@@ -1,0 +1,313 @@
+include "1wire.tbh"
+include "super_i2c.tbh"
+
+
+' NB! Set this variables prior using 1-wire library!
+'
+dim icsp_sda as pl_io_num = PL_IO_NULL
+dim icsp_scl as pl_io_num = PL_IO_NULL
+dim icsp_mclr as pl_io_num = PL_IO_NULL
+dim icsp_int as pl_io_num = PL_IO_NULL
+
+
+dim ssi_devid as byte = &h06
+dim ssi_flags as byte
+
+
+' Sets the 1-wire library I/O pin numbers
+'
+sub
+ow_init(io_dat as pl_io_num, io_scl as pl_io_num, io_mclr as pl_io_num, io_int as pl_io_num)
+	icsp_sda = io_dat
+	icsp_scl = io_scl
+	icsp_mclr = io_mclr
+	icsp_int = io_int
+end sub
+
+
+' \brief Updates CRC value using specified byte
+' \param[in] crc Current CRC value
+' \param[in] b Byte value
+' \returns Updated CRC value
+'
+function 
+ow_crc_update(crc as byte, b as byte) as byte
+	dim p as byte
+
+	for p=0 to 7
+		if ((crc xor b) and 1) = 1 then
+			crc = (crc shr 1) xor &h8C
+		else
+			crc = crc shr 1
+		end if
+		b = b shr 1
+	next p
+  
+	ow_crc_update = crc
+end function
+
+
+' PIC firmware holds control line 'stat' high while performing operation on
+' output pins. This is a workaround for clock stretching absence in current 
+' TiOS release.
+'
+' We don't want to use interrupt scheme because we want to be free
+' from any form of initialization code.
+'
+function
+ow_wait() as boolean
+	dim tmo as word
+	
+	tmo = sys.timercount + 2 ' 1 secs assuming 0.5 sec timer cycle
+	
+	do while io.lineget(icsp_int) = HIGH 
+		if sys.timercount >= tmo then
+			ow_wait = false
+			exit function
+		end if
+	loop
+	
+	ow_wait = true
+end function
+
+
+' \brief Send device address to the 1-wire bus
+' \param[in] chnl 1-wire channel number
+' \param[in] addr Device address
+'
+sub ow_send_addr(chnl as byte, addr as string)
+	dim n as byte
+	
+	if len(addr) <> 8 then
+		exit sub
+	end if
+	
+	for n=1 to 8
+		ow_sendb(chnl, asc(mid(addr, n, 1)))
+	next n
+end sub
+
+
+' \brief Receives 8 bytes of 1-wire device address.
+' \returns 1-wire device address 
+'
+function
+ow_recv_addr(chnl as byte) as string
+	dim n as byte
+	dim res as string
+	dim flag as boolean
+	
+	res = ""
+	for n=1 to 8 
+		flag = n <> 8
+		res = res + chr(ow_recvb(chnl, flag))
+	next n
+
+	ow_recv_addr = res
+end function
+
+
+' \brief Check given device address for validity
+' \retval true Device ID is valid
+' \retval false Device ID is invalid
+'
+function
+ow_addr_valid(devid as string) as boolean
+	dim i, crc as byte
+	
+	ow_addr_valid = false
+	
+	if devid = "\0\0\0\0\0\0\0\0" then
+		exit function
+	end if
+	
+	crc = ow_crc_update(0, asc(mid(devid, 1, 1)))
+	for i=2 to 7 
+		crc = ow_crc_update(crc, asc(mid(devid, i, 1)))
+	next i
+	
+	if crc = asc(mid(devid, 8, 1)) then
+		ow_addr_valid = true
+	end if
+end function 
+
+
+' \brief Start 1-wire transaction
+' \param[in] chnl Channel number 0...3
+' \param[in] cmd General 1-Wire command: OW_SKIP_ROM, etc.
+' \param[in] devid 1-Wire device address, or empty string, if don't care
+'
+function
+ow_start(chnl as byte, cmd as byte, devid as string) as boolean
+	dim n, ch as byte
+	
+	' Bits counted from right to left, from LSB to MSB
+	' bit 0 indicated operation type: 0=write, 1=read
+	' bits 7 and 6 contains channel number: 00 01 10 11 
+	' bit 5 determines FCV mode: 0=ordinary 1-wire, 1=Single-bus
+	'
+	ch = (chnl and &h03) shl 6
+	n = ch or (ssi_devid and &h1E)
+
+	if OW_READFCV = cmd then
+		n = n or &h20 or OW_READ_FLAG
+	else 
+		n = n or OW_WRITE_FLAG
+	end if
+
+	ow_wait()
+
+	' PIC issues Reset-PresenceDetect-pulse upon I2C Start condition
+	'
+	si2c_start()
+	ow_wait()
+
+	' Output device address and read/write flag
+	'
+	si2c_write(n)
+	ow_wait()
+	
+	if (OW_NONE <> cmd) and (OW_READFCV <> cmd) then
+		si2c_write(cmd)
+		ow_wait()
+		
+		if OW_MATCH_ROM = cmd then
+			ow_send_addr(chnl, devid)
+		end if
+	end if
+
+	ssi_flags = ch
+	if OW_READFCV = cmd then
+		ssi_flags = ssi_flags or 1
+	end if
+	
+	ow_start = true
+end function
+
+
+function
+ow_reset(chnl as byte) as boolean
+	dim n, ch as byte
+	
+	ch = (chnl and &h03) shl 6
+	n = ch or (ssi_devid and &h1E)
+	n = n or OW_WRITE_FLAG
+
+	ow_wait()
+
+	' PIC issues Reset-PresenceDetect-pulse upon I2C Start condition
+	'
+	si2c_start()
+	ow_wait()
+	
+	si2c_write(n)
+	ow_wait()
+	
+	si2c_stop()
+	
+	ow_reset = true
+end function
+
+
+' \brief Stop 1-wire transaction
+' \param[in] I/O port descriptor
+'
+sub
+ow_stop(chnl as byte)
+	ow_wait()
+	si2c_stop()
+	ssi_flags = 0
+end sub
+
+
+' \brief Sends one byte to the specified 1-wire channel
+'
+sub
+ow_sendb(chnl as byte, data as byte)
+	if ow_wait() then
+		si2c_write(data)
+	end if
+end sub
+
+
+' \brief Sends a series of bytes to 1-wire channel
+' \param[in] chnl Channel number 0..3
+' \param[in] data Bytes to send
+' \note Master (we) will send at most of len(\c data) bytes to the slave. Slave can terminate
+'		transaction by NACK'ing received byte
+sub
+ow_sendstr(chnl as byte, data as string)
+	dim i as byte
+	
+	for i=1 to len(data)
+		if ow_wait() = false then
+			exit sub
+		end if
+		si2c_write(mid(data, i, 1))
+	next i
+end sub
+
+
+' \brief Receives a single byte from specified 1-wire or Single-Bus channel
+' \param[in] chnl 1-Wire channel to read from, 0...3
+' \param[in] flag ACK/NACK flag. When \c flag is set to \c false, no more bytes can be 
+'				  received after this function call, i.e. master terminates read transaction
+' \returns Received byte
+function
+ow_recvb(chnl as byte, flag as boolean) as byte
+	dim n as byte
+	
+	if ow_wait() = false then
+		ow_recvb = &hFF
+		exit function
+	end if
+
+	if (0 = (ssi_flags and OW_READ_FLAG)) then
+		ssi_flags = ssi_flags or OW_READ_FLAG
+
+		' Perform 1-wire reset sequence
+		si2c_start()
+		if ow_wait() = false then
+			ow_recvb = &hFF
+			exit function
+		end if
+		
+		' Write 1-wire device address
+		'
+		n = (chnl shl 6) or (ssi_devid and &h1E) or OW_READ_FLAG
+		si2c_write(n)
+		if ow_wait() = false then
+			ow_recvb = &hFF
+			exit function
+		end if
+	end if
+
+	ow_recvb = si2c_read(flag)
+end function
+
+
+' \brief Receives a series of bytes from 1-wire channel
+' \param[in] chnl Channel number 0..3
+' \param[in] cbmax Maximum number of bytes to read from channel
+' \returns String containing all the readed data, up to \c cbmax bytes
+' \note This function will read at most \c cbmax bytes, until NACK is encountered
+function
+ow_recvstr(chnl as byte, cbmax as byte) as string
+	dim res as string
+	dim last as boolean
+	dim i as byte
+	
+	if 0 = cbmax then
+		ow_recvstr = ""
+		exit function
+	end if
+
+	res = ""
+
+	for i=0 to cbmax
+		last = i < (cbmax-1)
+		res = res + chr(ow_recvb(chnl, last))
+	next i
+		
+	ow_recvstr = res
+end function

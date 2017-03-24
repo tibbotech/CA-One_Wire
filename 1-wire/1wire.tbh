@@ -1,0 +1,34 @@
+' Standard 1-wire commands
+'
+const OW_NONE = &h00
+const OW_SKIP_ROM = &hCC		' Ignore addressing
+const OW_READ_ROM = &h33		' Read address from bus
+const OW_MATCH_ROM = &h55		' Address specific device
+const OW_SEARCH_ROM	= &hF0		' Perform device enumeration step
+const OW_SEARCH_INIT = &hF1		' Init device enumerator
+
+
+' Commands below is non-standart, Tibbo tibbit specific and used to
+' communicate with PIC firmware
+'
+const OW_DETECT_ROM	= &h0F		' Returns 00 if no presence pulse detected on bus, FF otherwise
+const OW_READFCV = &hAA			' Initiate read sequence of so-called "Single Wire" bus
+
+
+const OW_WRITE_FLAG = 0
+const OW_READ_FLAG = 1
+
+
+declare icsp_scl, icsp_sda, icsp_mclr, icsp_int as pl_io_num
+declare sub ow_init(io_dat as pl_io_num, io_scl as pl_io_num, io_mclr as pl_io_num, io_int as pl_io_num)
+declare sub ow_setdevaddr(addr as byte)
+declare function ow_reset(chnl as byte) as boolean
+declare function ow_start(chnl as byte, cmd as byte, addr as string) as boolean
+declare sub ow_stop(chnl as byte)
+declare sub ow_sendstr(chnl as byte, s as string)
+declare sub ow_sendb(chnl as byte, b as byte)
+declare function ow_recvstr(chnl as byte, cbmax as byte) as string
+declare function ow_recvb(chnl as byte, flag as boolean) as byte
+declare function ow_recv_addr(chnl as byte) as string
+declare sub ow_send_addr(chnl as byte, addr as string)
+declare function ow_addr_valid(addr as string) as boolean

@@ -1,0 +1,9 @@
+include "super_i2c.tbh"
+include "ssi\trunk\ssi.tbh"
+include "super_i2c.tbh"
+include "1wire.tbh"
+include "PIC_LVP.tbh"
+include "device.tbh"
+
+
+const FW_FILE = "i2c_1wire_bridge.hex"

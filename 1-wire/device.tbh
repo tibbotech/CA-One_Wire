@@ -1,0 +1,56 @@
+' 1-wire port number is 0, 1, 2 or 3 and corresponds to PIC pins RA4(0), RC3(1), RA2(2), RC2(3)
+' BUG: current version of firmware incorrectly works with pin RC2, so real number of 1-wire ports is 3
+'
+' We have DS18B20 temperature sensor from Maxim Integrated connected to
+' 1-wire port 0 with external power supply attached (+5VDC) in our test configuration.
+'
+' DS18B20 can be powered by 'parasite power' taken from data/ground lines, but we cannot provide
+' it because PIC doesn't have strong pullup, only weak one. So external power is required.
+'
+' DS18B20 uses commands &h44 (Convert T) and &hBE (Read Scratchpad) to measure T
+' and report it to the master device (us)
+'
+const CMD_CONVERT_T = &h44
+const CMD_READ_SCRATCHPAD = &hBE
+const TMR_PERIOD = 2
+const MAX_SENSORS = 16
+
+enum tibbit_sockets
+	IS_1
+	IS_3
+	IS_5
+	IS_7
+	IS_9
+	IS_11
+	IS_13
+	IS_15
+	IS_17
+	IS_19
+	IS_21
+	EM1000_LEV
+	USER_DEF
+end enum
+
+enum channel
+	UNUSED = 0
+	ONE_WIRE = 1
+	SINGLE_WIRE = 2
+end enum
+
+type sensor
+	chnl as byte
+	addr as string(8)
+end type
+
+declare pic_slot as byte
+declare sens as sensor(MAX_SENSORS) ' 1-wire address consists of type byte, six address bytes and checksum byte
+declare num_sens as byte
+declare tmr as byte
+declare i2c_addr as char
+declare channels as channel(4)
+
+declare sub choose_iolines(socket as byte) 
+declare function fmt_addr(addr as string) as string
+declare sub delay(ms as dword)
+declare function detect_sensors() as byte
+declare function is_data_valid(data as string(5)) as boolean

@@ -1,0 +1,637 @@
+include "PIC_LVP.tbh"
+
+
+declare icsp_scl, icsp_sda, icsp_mclr, icsp_int as pl_io_num
+
+
+' Commands defined in PDF
+'
+enum pic_lvp_cmd
+	CMD_LOAD_CONFIG = &h00,							' read  (0) data(14) (0)
+	CMD_LOAD_DATA_FOR_PROGRAM_MEMORY = &h02,		' write (0) data(14) (0)
+	CMD_LOAD_DATA_FOR_DATA_MEMORY = &h03,			' write (0) data(8) zero(6) (0)
+	CMD_READ_DATA_FROM_PROGRAM_MEMORY = &h04,		' read  (0) data(14) (0)
+	CMD_READ_DATA_FROM_DATA_MEMORY = &h05,			' read  (0) data(8) zero(6) (0)
+	CMD_INCREMENT_ADDRESS = &h06,					' -
+	CMD_BEGIN_INTERNALLY_TIMED_PROGRAMMING = &h08,	' -
+	CMD_BULK_ERASE_PROGRAM_MEMORY = &h09,			' -
+	CMD_END_EXTERNALLY_TIMED_PROGRAMMING = &h0A,	' -
+	CMD_BULK_ERASE_DATA_MEMORY = &h0B,				' -
+	CMD_ROW_ERASE_PROGRAM_MEMORY = &h11,			' -
+	CMD_RESET_ADDRESS = &h16,						' -
+	CMD_BEGIN_EXTERNALLY_TIMED_PROGRAMMING = &h18	' -
+end enum
+
+
+type firmware
+	datalen as word 
+	data(MAX_DATA_LEN) as word
+	config(MAX_CFG_LEN) as word
+end type
+
+
+' Global flag to enable/disable SSI use
+dim use_ssi as boolean
+
+
+#define T_ERAB_MS		5
+#define T_PINT_MS		6
+#define T_PEXT_MS		3
+
+
+function swab(w as word) as word
+	swab = ((w shr 8) and &hFF) or ((w and &hFF) shl 8)
+end function
+
+
+sub delay_ms(ms as word)
+#if PLATFORM_ID=TPP2W or PLATFORM_ID=TPP3W
+	dim ax,bx as word
+
+	for ax=0 to ms
+		for bx=0 to 5
+		next bx
+	next ax
+#else
+	dim t as dword
+	ms = sys.timercountms + ms
+	while sys.timercountms < ms
+	wend
+#endif
+end sub
+
+
+sub pic_set_reset(rv as boolean)
+	io.num = icsp_mclr
+	io.enabled = YES
+	if rv then
+		io.state = LOW
+	else
+		io.state = HIGH
+	end if
+end sub
+
+
+sub pic_do_reset()
+	pic_set_reset(true)
+	delay_ms(1)
+	pic_set_reset(false)
+end sub
+
+
+sub start_stop_bit()
+	io.num = icsp_sda
+	io.enabled = YES
+	io.state = LOW
+
+	io.num = icsp_scl
+	io.state = HIGH
+	io.state = LOW
+	
+	io.num = icsp_sda
+	io.enabled = NO
+
+	io.num = icsp_scl
+	io.enabled = YES
+end sub
+
+
+sub setup_ssi()
+	if use_ssi then
+		ssi.channel = 0
+		ssi.clkmap = icsp_scl
+		ssi.dimap = icsp_sda
+		ssi.domap = icsp_sda
+		ssi.zmode = PL_SSI_ZMODE_ENABLED_ON_ZERO
+		ssi.mode = PL_SSI_MODE_1
+		ssi.baudrate = 128 ' Change this according to your needs
+		ssi.enabled = YES
+	end if
+end sub
+
+
+sub pic_send_bits(data as dword, numbits as byte)
+	dim i as byte
+
+	if use_ssi then
+		if numbits > 16 then
+			ssi.value(data and &hFFFF, 16)
+			ssi.value(data shr 16, numbits - 16)
+		else
+			ssi.value(data, numbits)
+		end if
+	else
+		io.num = icsp_sda
+		io.enabled = YES
+		io.state = LOW
+		
+		io.num = icsp_scl
+		io.enabled = YES
+		io.state = LOW
+
+		for i = 0 to numbits-1
+			io.lineset(icsp_sda, data and &h0001)
+			io.state = HIGH
+			io.state = LOW
+			io.lineset(icsp_sda, LOW)
+			data = data shr 1
+		next i
+	end if
+end sub
+
+
+' Receive bits from the wire
+'
+function pic_recv_bits() as word
+	dim i as byte
+	dim res as word
+	
+	if use_ssi then
+		res = ssi.value(&h7FFE, 16)
+		res = (res shr 1) and &h3FFF
+	else
+		res = 0
+
+		start_stop_bit()
+		
+		for i = 0 to 13
+			io.state = HIGH
+			res = (res shr 1) or ((io.lineget(icsp_sda) and &h1) shl 13)
+			io.state = LOW
+		next i
+
+		start_stop_bit()
+	end if
+	pic_recv_bits = res
+end function
+
+
+sub pic_command(b as byte)
+	pic_send_bits(b, 6)
+end sub
+
+
+sub pic_command_and_delay(b as byte, ms as word)
+	pic_send_bits(b, 6)
+	delay_ms(ms)
+end sub
+
+
+function pic_recv_pgm_word() as word
+	dim w as word
+	pic_command(CMD_READ_DATA_FROM_PROGRAM_MEMORY)
+	w = pic_recv_bits()
+	pic_recv_pgm_word = swab(w) ' swap nibbles
+	pic_command(CMD_INCREMENT_ADDRESS)
+end function
+
+
+function pic_recv_cfg_word() as word
+	pic_command(CMD_READ_DATA_FROM_PROGRAM_MEMORY)
+	pic_recv_cfg_word = pic_recv_bits() ' No need to swap nibbles
+	pic_command(CMD_INCREMENT_ADDRESS)
+end function
+
+
+' Loads a current latch with 14 bits of data, then
+' increments latch address
+'
+sub pic_send_pgm_word(w as word, doinc as boolean)
+	dim t as word
+	t = swab(w) ' swap nibbles
+	pic_command(CMD_LOAD_DATA_FOR_PROGRAM_MEMORY)
+	pic_send_bits((t shl 1) and &h7FFE, 16)
+	if doinc then
+		pic_command(CMD_INCREMENT_ADDRESS)
+	end if
+end sub
+
+
+function pic_send_cfg_word_bulk(w as word) as boolean
+	pic_command(CMD_LOAD_DATA_FOR_PROGRAM_MEMORY)
+	pic_send_bits((w shl 1) and &h7FFE, 16)
+	pic_command(CMD_INCREMENT_ADDRESS)
+end function
+
+
+' Performs one-word program cycle, as depicted on picture 5-3 on page 24 of the pdf
+'
+function pic_send_cfg_word(w as word) as word
+	pic_command(CMD_LOAD_DATA_FOR_PROGRAM_MEMORY)
+	pic_send_bits((w shl 1) and &h7FFE, 16)
+	pic_command_and_delay(CMD_BEGIN_INTERNALLY_TIMED_PROGRAMMING, T_PINT_MS)
+	pic_command(CMD_READ_DATA_FROM_PROGRAM_MEMORY)
+	pic_send_cfg_word = pic_recv_bits()
+	sys.debugprint(hex(pic_send_cfg_word)+"\r\n")
+	pic_command(CMD_INCREMENT_ADDRESS)
+end function
+
+
+sub pic_enter_lvp_mode()
+	io.num = icsp_scl
+	io.enabled = YES
+	io.state = LOW
+	
+	io.num = icsp_sda
+	io.enabled = YES
+	io.state = LOW
+
+	' Enter LVP mode
+	' Bring MCLR to V_il (low state)
+	delay_ms(10)
+	
+	io.num = icsp_mclr
+	io.enabled = YES
+	io.state = HIGH
+	
+	delay_ms(10)
+	
+	io.state = LOW
+	delay_ms(2)
+	
+	' This is a 'magic' sequence of bits, which forces PIC
+	' to fall into the low voltage programming mode
+	'
+	' pic_send_bits(&b01001101010000110100100001010000, 33)
+	' Note that bit order is LSB to MSB!
+	pic_send_bits(&b01010000, 8) ' P
+	pic_send_bits(&b01001000, 8) ' H
+	pic_send_bits(&b01000011, 8) ' C
+	pic_send_bits(&b01001101, 9) ' M + 1 extra 0 bit
+	
+	delay_ms(20)
+end sub
+
+
+sub pic_leave_lvp_mode()
+	io.num = icsp_mclr
+	io.state = HIGH
+	io.state = LOW
+	delay_ms(5)
+	io.state = HIGH
+
+	io.num = icsp_scl
+	io.enabled = YES
+	io.state = HIGH
+
+	io.num = icsp_sda
+	io.enabled = YES
+	io.state = HIGH
+	
+	delay_ms(10)
+end sub
+
+
+function pic_id(id as word, byref model as string) as boolean
+	pic_id = true
+	select case id
+		case &b100111100
+			model = "16F1826"
+		case &b100111101
+			model = "16F1827"
+		case &b101000100
+			model = "16LF1826"
+		case &b101000101
+			model = "16LF1827"
+		case &b100111001
+			model = "16F1823"
+		case &b101000001
+			model = "16LF1823"
+		case &b100111000
+			model = "12F1822"
+		case &b101000000
+			model = "12LF1822"
+		case &b100111010
+			model = "16F1824"
+		case &b101000010
+			model = "16LF1824"
+		case &b100111011
+			model = "16F1825"
+		case &b101000011
+			model = "16LF1825"
+		case &b100111110
+			model = "16F1828"
+		case &b101000110
+			model = "16LF1828"
+		case &b100111111
+			model = "16F1829"
+		case &b101000111			
+			model = "16LF1829"
+		case else
+			pic_id = false
+	end select
+end function
+
+	
+' LVP (In-circuit Low Voltage Programming) of PIC coprocessor functions and procedures, as
+' described in PIC16F/LF182X/PIC12F/LF1822 Memory Programming Specification
+' located at http://ww1.microchip.com/downloads/en/DeviceDoc/41390C.pdf
+'
+function get_device_identification(socket as byte) as icsp_device_status
+	dim devid, rev as word 
+	dim wtmp(11) as word
+	dim verid, verno as word
+	dim i as byte
+	dim pic_model as string(8)
+
+	setup_ssi()
+	
+	pic_enter_lvp_mode()
+
+	' Set address to 0x8000
+	'
+	pic_command(CMD_LOAD_CONFIG) 
+	pic_recv_bits()
+
+	for i = 0 to 10
+		wtmp(i) = pic_recv_cfg_word() 	' Get config words from 0x8000 to 0x800A
+	next i
+
+	pic_leave_lvp_mode()
+	
+#ifdef PIC_TRACE
+	sys.debugprint("Config words: "+hex(wtmp(7))+", "+hex(wtmp(8))+"\r\n")
+#endif		
+
+	devid = (wtmp(6) shr 5) and &b1111111111
+	rev = wtmp(6) and &b11111
+	
+	if not pic_id(devid, pic_model) then
+		get_device_identification = ICSP_INVALID_DEVICE
+#ifdef PIC_TRACE
+		sys.debugprint("Invalid device ID: "+hex(devid)+"\r\n")
+#endif		
+		exit function
+	else
+#ifdef PIC_TRACE
+		sys.debugprint("Found PIC model " + pic_model + ", revision " + str(rev) + "\r\n")
+#endif		
+	end if
+	
+	verid = ((wtmp(0) and &hFF) shl 8) or (wtmp(1) and &hFF)
+	if verid <> &h3157 then ' 3157 = "1W"
+		get_device_identification = ICSP_NO_FIRMWARE
+		exit function
+	end if
+	   
+	verid = ((wtmp(2) and &hFF) shl 8) or (wtmp(3) and &hFF)
+	
+	sys.debugprint("Found 1-wire firmware version " + str((verid shr 8) and &hFF) + "." + str(verid and &hFF) + "\r\n")
+	
+	get_device_identification = ICSP_FOUND
+end function
+	
+
+' Parses .HEX file and fills buffer with parsed data
+'
+function load_firmware(byref name as string, byref fw as firmware) as boolean
+	dim i, offs, temp, addr as word
+	dim p, e, lba as dword
+	dim s, st as string
+	dim rlen, rtyp as byte
+	
+	load_firmware = false
+
+#ifdef PIC_TRACE
+	sys.debugprint("Parsing HEX file\r\n")
+#endif
+
+	fw.datalen = 0
+	for i=0 to MAX_DATA_LEN-1
+		fw.data(i) = &hFF3F
+	next i
+	
+	romfile.open(name)
+	if romfile.size = 0 then
+		exit function
+	end if
+
+	lba = 0
+	
+	while 1
+		' Find Start-Of-Record mark
+		p = romfile.find32(p, ":", 1)
+		if p = 0 then
+			exit while
+		end if
+		
+		' Find end of line
+		e = romfile.find32(p, "\r\n", 1)
+		if e = 0 then
+			e = romfile.size
+		end if
+		
+		' Check line length
+		if e - p > 255 then
+			exit while
+		end if
+		
+		' Get the record
+		romfile.pointer32 = p
+		s = romfile.getdata(e - p)
+		p = e + 2
+		
+		' Parse the record
+		rlen = val("&h" + mid(s, 2, 2))
+		offs = val("&h" + mid(s, 4, 4))
+		rtyp = val("&h" + mid(s, 8, 2))
+		
+		select case rtyp
+			case &h00: ' DATA
+				' Data record must be word-aligned
+				'
+				if rlen mod 2 <> 0 then
+					exit function
+				end if
+				
+				for i = 0 to (rlen / 2) - 1
+					st = mid(s, 10 + i*4, 4)
+					temp = val("&h" + st)
+					if lba = 0 then
+						addr = lba + offs/2 + i
+						fw.data(addr) = temp
+						if addr > fw.datalen then
+							fw.datalen = addr
+						end if
+					else if lba = &h10000 then
+						fw.config(offs/2 + i) = temp
+					end if
+				next i
+				
+			case &h01: ' EOF
+				exit while
+				
+			case &h02: ' Extended Segment Address 
+				False ' Breakpoint placeholder
+				
+			case &h03: ' Start Segment Address
+				False ' Breakpoint placeholder
+				
+			case &h04: ' Extended Linead Address
+				' The 32-bit Extended Linear Address Record is used to specify bits 16-31 of 
+				' the Linear Base Address (LBA), where bits 0-15 of the LBA are zero.
+				if rlen <> 2 then
+					exit function
+				end if
+				st = mid(s, 10, 4)
+				lba = val("&h" + st)
+				lba = lba shl 16
+				
+			case &h05: ' Start Linear Address
+				False ' Breakpoint placeholder
+				
+			case else:
+				exit function
+		end select
+	wend
+	
+	load_firmware = true
+end function
+
+
+sub program_config_words(byref fw as firmware)
+	dim i as word
+	dim config0, config1 as word
+	dim uid0, uid1, uid2, uid3 as word
+	
+#ifdef PIC_TRACE
+	sys.debugprint("Programming user ID and config words\r\n")
+#endif
+
+	pic_command(CMD_LOAD_CONFIG) 
+	pic_recv_bits()
+
+	uid0 = swab(fw.config(0))
+	uid1 = swab(fw.config(1))
+	uid2 = swab(fw.config(2))
+	uid3 = swab(fw.config(3))
+	
+	' 4 words of user ID
+	'
+	pic_send_cfg_word(uid0)				' 0x8000
+	pic_send_cfg_word(uid1)				' 0x8001
+	pic_send_cfg_word(uid2)				' 0x8002
+	pic_send_cfg_word(uid3)				' 0x8003
+
+	pic_command(CMD_INCREMENT_ADDRESS)	' 0x8004
+	pic_command(CMD_INCREMENT_ADDRESS)	' 0x8005
+	pic_command(CMD_INCREMENT_ADDRESS)	' 0x8006
+
+	' Config words 1 and 2
+	'
+	config0 = swab(fw.config(7))
+	config1 = swab(fw.config(8))
+	
+	sys.debugprint("CONFIG1 and CONFIG2 words are " + hex(config0) + " and " + hex(config1) + "\r\n")
+	
+	pic_send_cfg_word(config0)			' 0x8007
+	pic_send_cfg_word(config1)			' 0x8008
+	
+	'pic_command_and_delay(CMD_BEGIN_INTERNALLY_TIMED_PROGRAMMING, T_PINT_MS)
+end sub
+
+
+function program_firmware(socket as byte, byref fw as firmware) as boolean
+	dim i, j, temp, datalen as word
+	
+	datalen = fw.datalen
+	if datalen mod 32 <> 0 then
+		datalen = (datalen or 31) + 1 ' Round to next power of 32
+	end if
+	
+	program_firmware = false
+	
+	setup_ssi()
+	
+	pic_enter_lvp_mode()
+
+#ifdef PIC_TRACE
+	sys.debugprint("Erasing memory\r\n")
+#endif
+	pic_command(CMD_LOAD_CONFIG)
+	pic_recv_bits()
+	
+	pic_command_and_delay(CMD_BULK_ERASE_PROGRAM_MEMORY, T_ERAB_MS)
+	'pic_command_and_delay(CMD_BULK_ERASE_DATA_MEMORY, T_ERAB_MS)
+
+#ifdef PIC_TRACE
+	sys.debugprint("Uploading ")
+#endif
+
+	pic_command(CMD_RESET_ADDRESS)
+	for i=0 to datalen step 32
+#ifdef PIC_TRACE
+		sys.debugprint("#")
+#endif
+		for j=0 to 31
+			pic_send_pgm_word(fw.data(i+j), j<31)
+		next j
+		pic_command_and_delay(CMD_BEGIN_INTERNALLY_TIMED_PROGRAMMING, T_PINT_MS)
+		pic_command(CMD_INCREMENT_ADDRESS)
+	next i
+	
+#ifdef PIC_TRACE
+	sys.debugprint("\r\n")
+#endif
+
+	pic_leave_lvp_mode()
+
+	'delay_ms(25)
+
+	pic_enter_lvp_mode()
+
+	program_config_words(fw)
+
+	' Now verify what we just programmed
+	'
+#ifdef PIC_TRACE
+	sys.debugprint("Verifying ")
+#endif
+	
+	pic_command(CMD_RESET_ADDRESS)
+	
+	for i=0 to datalen step 32
+#ifdef PIC_TRACE
+		sys.debugprint("#")
+#endif
+		for j=0 to 31
+			temp = pic_recv_pgm_word()
+			if temp <> fw.data(i+j) then
+#ifdef PIC_TRACE
+				sys.debugprint("\r\nData check error: "+hex(i+j)+": read "+hex(temp)+", expected "+hex(fw.data(i+j))+"\r\n")
+#endif
+				pic_leave_lvp_mode()
+				exit function
+			end if
+		next j
+	next i
+
+#ifdef PIC_TRACE
+	sys.debugprint("\r\n")
+#endif
+
+	pic_leave_lvp_mode()
+	
+	ssi.enabled = NO
+	
+	pic_do_reset()
+	
+#ifdef PIC_TRACE
+	sys.debugprint("Success\r\n")
+#endif
+	program_firmware = true
+end function
+
+
+function pic_upload_firmware(socket as byte, byref fwname as string) as boolean
+	dim fw as firmware
+	
+	load_firmware(fwname, fw)
+	if not program_firmware(socket, fw) then
+		sys.debugprint("UPLOADING FAILED\r\n")
+		pic_upload_firmware = false
+	else
+		pic_upload_firmware = true
+	end if
+end function
+

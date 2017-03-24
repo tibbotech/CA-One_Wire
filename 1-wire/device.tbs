@@ -1,0 +1,263 @@
+include "global.tbh"
+
+public dim pic_slot as byte
+public dim sens as sensor(MAX_SENSORS) ' 1-wire address consists of type byte, six address bytes and checksum byte
+public dim num_sens as byte
+public dim tmr as byte
+public dim i2c_addr as char
+public dim channels as channel(4)
+
+
+' Sets I/O lines for the PIC controller depending on slot number
+'
+sub choose_iolines(socket as byte) 
+	select case socket
+	case IS_1:
+		#if PLATFORM_ID=TPP3W or PLATFORM_ID=TPP3WG2
+			icsp_scl=PL_IO_NUM_9_TX0
+			icsp_sda=PL_IO_NUM_8_RX0
+			icsp_mclr=PL_IO_NUM_0
+			icsp_int=PL_IO_NUM_16_INT0
+		#elif PLATFORM_ID=TPP2W or PLATFORM_ID=TPP2WG2
+			icsp_scl=PL_IO_NUM_9_TX0
+			icsp_sda=PL_IO_NUM_8_RX0
+			icsp_mclr=PL_IO_NUM_0
+			icsp_int=PL_IO_NUM_16_INT0
+		#endif
+
+	case IS_3:
+		#if PLATFORM_ID=TPP3W or PLATFORM_ID=TPP3WG2
+			icsp_scl=PL_IO_NUM_32
+			icsp_sda=PL_IO_NUM_33
+			icsp_mclr=PL_IO_NUM_4
+			icsp_int=PL_IO_NUM_20_INT4
+		#elif PLATFORM_ID=TPP2W or PLATFORM_ID=TPP2WG2
+			icsp_scl=PL_IO_NUM_11_TX1
+			icsp_sda=PL_IO_NUM_10_RX1
+			icsp_mclr=PL_IO_NUM_1
+			icsp_int=PL_IO_NUM_17_INT1
+		#endif
+
+	case IS_5:
+		#if PLATFORM_ID=TPP3W or PLATFORM_ID=TPP3WG2
+			icsp_scl=PL_IO_NUM_11_TX1
+			icsp_sda=PL_IO_NUM_10_RX1
+			icsp_mclr=PL_IO_NUM_1
+			icsp_int=PL_IO_NUM_17_INT1
+		#elif PLATFORM_ID=TPP2W or PLATFORM_ID=TPP2WG2
+			icsp_scl=PL_IO_NUM_13_TX2
+			icsp_sda=PL_IO_NUM_12_RX2
+			icsp_mclr=PL_IO_NUM_2
+			icsp_int=PL_IO_NUM_18_INT2
+		#endif
+
+	case IS_7:
+		#if PLATFORM_ID=TPP3W or PLATFORM_ID=TPP3WG2
+			icsp_scl=PL_IO_NUM_34
+			icsp_sda=PL_IO_NUM_35
+			icsp_mclr=PL_IO_NUM_5
+			icsp_int=PL_IO_NUM_21_INT5
+		#elif PLATFORM_ID=TPP2W or PLATFORM_ID=TPP2WG2
+			icsp_scl=PL_IO_NUM_15_TX3
+			icsp_sda=PL_IO_NUM_14_RX3
+			icsp_mclr=PL_IO_NUM_3
+			icsp_int=PL_IO_NUM_19_INT3
+		#endif
+
+	case IS_9:
+		#if PLATFORM_ID=TPP3W or PLATFORM_ID=TPP3WG2
+			icsp_scl=PL_IO_NUM_13_TX2
+			icsp_sda=PL_IO_NUM_12_RX2
+			icsp_mclr=PL_IO_NUM_2
+			icsp_int=PL_IO_NUM_18_INT2
+		#elif PLATFORM_ID=TPP2W or PLATFORM_ID=TPP2WG2
+			icsp_scl=PL_IO_NUM_32
+			icsp_sda=PL_IO_NUM_33
+			icsp_mclr=PL_IO_NUM_4
+			icsp_int=PL_IO_NUM_20_INT4
+		#endif
+
+	case IS_11:
+		#if PLATFORM_ID=TPP3W or PLATFORM_ID=TPP3WG2
+			icsp_scl=PL_IO_NUM_36
+			icsp_sda=PL_IO_NUM_37
+			icsp_mclr=PL_IO_NUM_6
+			icsp_int=PL_IO_NUM_22_INT6
+		#elif PLATFORM_ID=TPP2W or PLATFORM_ID=TPP2WG2
+			icsp_scl=PL_IO_NUM_34
+			icsp_sda=PL_IO_NUM_35
+			icsp_mclr=PL_IO_NUM_5
+			icsp_int=PL_IO_NUM_21_INT5
+		#endif
+
+	case IS_13:
+		#if PLATFORM_ID=TPP3W or PLATFORM_ID=TPP3WG2
+			icsp_scl=PL_IO_NUM_15_TX3
+			icsp_sda=PL_IO_NUM_14_RX3
+			icsp_mclr=PL_IO_NUM_3
+			icsp_int=PL_IO_NUM_19_INT3
+		#elif PLATFORM_ID=TPP2W or PLATFORM_ID=TPP2WG2
+			exit sub
+		#endif
+
+	case IS_15:
+		#if PLATFORM_ID=TPP3W or PLATFORM_ID=TPP3WG2
+			icsp_scl=PL_IO_NUM_38
+			icsp_sda=PL_IO_NUM_39
+			icsp_mclr=PL_IO_NUM_7
+			icsp_int=PL_IO_NUM_23_INT7
+		#elif PLATFORM_ID=TPP2W or PLATFORM_ID=TPP2WG2
+			exit sub
+		#endif
+
+	case IS_17:
+		#if PLATFORM_ID=TPP3W or PLATFORM_ID=TPP3WG2
+			icsp_scl=PL_IO_NUM_24
+			icsp_sda=PL_IO_NUM_25
+			icsp_mclr=PL_IO_NUM_26
+			icsp_int=PL_IO_NUM_27
+		#elif PLATFORM_ID=TPP2W or PLATFORM_ID=TPP2WG2
+			exit sub
+		#endif
+
+	case IS_19:
+		#if PLATFORM_ID=TPP3W or PLATFORM_ID=TPP3WG2
+			icsp_scl=PL_IO_NUM_28
+			icsp_sda=PL_IO_NUM_29
+			icsp_mclr=PL_IO_NUM_30
+			icsp_int=PL_IO_NUM_31
+		#elif PLATFORM_ID=TPP2W or PLATFORM_ID=TPP2WG2
+			exit sub
+		#endif
+
+	case IS_21:
+		#if PLATFORM_ID=TPP3W or PLATFORM_ID=TPP3WG2
+			icsp_scl=PL_IO_NUM_40
+			icsp_sda=PL_IO_NUM_41
+			icsp_mclr=PL_IO_NUM_42
+			icsp_int=PL_IO_NUM_43
+		#elif PLATFORM_ID=TPP2W or PLATFORM_ID=TPP2WG2
+			exit sub
+		#endif
+
+	case EM1000_LEV:
+		#if PLATFORM_ID=EM1000W or PLATFORM_ID=EM1000
+			icsp_scl=PL_IO_NUM_39
+			icsp_sda=PL_IO_NUM_37
+			icsp_mclr=PL_IO_NUM_48
+		#else
+			sys.halt()
+			'Please check your platform, only for EM1000_LEV.
+		#endif
+
+	case USER_DEF:
+		icsp_scl=USR_SCL
+		icsp_sda=USR_SDA
+		icsp_mclr=USR_MCLR
+		icsp_int=USR_INT
+	end select
+end sub
+
+
+' Utility function used to convert 1-wire address into the human-readable string
+'
+function fmt_addr(addr as string) as string
+	dim i as byte
+	dim res as string
+	dim c as integer
+	
+	res = ""
+	for i=1 to 7
+		c = asc(mid(addr, 8-i, 1))
+		if c < 10 then
+			res = res + "0"
+		end if
+		res = res + mid(hex(c), 3, 10)
+		if i = 6 then
+			res = res + ":"
+		else if i < 6 then
+			res = res + "."
+		end if
+	next i
+	fmt_addr = res
+end function
+
+
+sub delay(ms as dword)
+	dim i as dword
+#if PLATFORM_ID = TPP2W or PLATFORM_ID = TPP3W
+	dim j as dword
+	for i = 0 to ms
+		for j = 0 to 10
+		next j
+	next i
+#elif PLATFORM_ID = TPP2WG2 or PLATFORM_ID = TPP3WG2
+	i = sys.timercountms + ms
+	while sys.timercountms < i
+	wend
+#else
+#error "Your platform not yet supported. Sorry"
+#endif
+end sub
+
+
+' This function is called prior main cycle to enumerate all devices, connected
+' to the 1-wire bus
+'
+function detect_sensors() as byte
+	dim nd as integer
+	dim chnl as byte
+	dim ta as string(8)
+	dim av as boolean
+
+	nd = 0
+	num_sens = 0
+	
+	for chnl=0 to 3
+		if channels(chnl) = ONE_WIRE then
+			' As a first step, try to acquire connected device address
+			' Note: Do not intermix operation on different 1-wire channels,
+			'       because firmware supports only sequential access
+			'
+			' Note 2: If you sure that you have only one device connected to
+			' 		  port you can skip this step and use OW_SKIP_ROM command
+			'		  instead of OW_MATCH_ROM
+			'
+			ow_start(chnl, OW_SEARCH_INIT, "")
+			ow_stop(chnl)
+			
+			sys.debugprint("Scanning 1-Wire channel #" + str(chnl) + "\r\n")
+			
+			do 
+				ow_start(chnl, OW_SEARCH_ROM, "")
+				ta = ow_recv_addr(chnl)
+				ow_stop(chnl)
+
+				av = ow_addr_valid(ta)
+				if av then
+					nd = nd + 1
+					sys.debugprint("1-Wire device #"+str(nd)+" found: " + fmt_addr(ta)+"\r\n")
+					
+					' Device class &h28 is Programmable resolution digital thermometer (DS18B20)
+					' see http://owfs.sourceforge.net/family.html for more information
+					'
+					if asc(mid(ta, 1, 1)) = &h28 then
+						sens(num_sens).chnl = chnl
+						sens(num_sens).addr = ta
+						num_sens = num_sens + 1
+					end if
+				end if
+			loop until not av
+		end if
+	next sens
+	
+	sys.debugprint(str(nd)+" devices connected total, "+str(num_sens)+" temperature sensors\r\n")
+	tmr = TMR_PERIOD
+end function
+
+function is_data_valid(data as string(5)) as boolean
+	dim cksum as byte
+	cksum = asc(mid(data, 1, 1)) + asc(mid(data, 2, 1)) + asc(mid(data, 3, 1)) + asc(mid(data, 4, 1))
+	is_data_valid = (cksum = asc(mid(data, 5, 1)))
+end function
+

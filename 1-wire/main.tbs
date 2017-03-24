@@ -1,0 +1,161 @@
+include "global.tbh"
+
+
+sub on_sys_init()
+	' -----------------
+	dim i as byte
+	dim res as icsp_device_status
+	
+	beep.divider = 21600
+	
+	
+	' Set up I/O lines based on the slot number where PIC with 1-wire firmware is installed
+	' We assume that PIC is installed in slot 1
+	'
+	choose_iolines(IS_1)
+	
+	
+	' Enable h/w SSI use
+	use_ssi = true
+	
+
+	' Assign types for PIC channels, there are three modes ONE_WIRE, SINGLE_WIRE and UNUSED
+	'
+	channels(0) = ONE_WIRE 	
+	channels(1) = ONE_WIRE 		
+	channels(2) = UNUSED 	
+	channels(3) = UNUSED		' channel 3 is not available
+
+
+	res = get_device_identification(pic_slot)
+	select case res
+		case ICSP_NO_FIRMWARE
+			sys.debugprint("Programming PIC coprocessor with new firmware.\r\n")
+			sys.debugprint("Please be patient. This can take a while.\r\n")
+			if not pic_upload_firmware(pic_slot, "i2c_1wire_bridge.hex") then
+				sys.halt
+			end if
+			
+		case ICSP_INVALID_DEVICE
+			sys.debugprint("No vaild PIC device found. Stop.\r\n")
+			sys.halt
+			
+		case ICSP_VERSION_LOWER
+		case ICSP_VERSION_HIGHER
+			sys.debugprint("Firmware version mismatch\r\n")
+			
+		case else ' ICSP_FOUND
+			False ' Nothing to do. Just placeholder for possible breakpoint
+			
+	end select
+	
+	' I2C initialization code
+	
+	i2c_addr = si2c_register("1W", icsp_sda, icsp_scl, NO)
+	si2c_get(i2c_addr)
+	detect_sensors()
+end sub
+
+	
+sub on_sys_timer()
+	dim sp as string(8)
+	dim temp as word
+	dim itemp as long
+	dim rh as word
+	dim i as byte
+	dim chnl as byte
+	dim addr as string(8)
+
+	tmr = tmr - 1
+	if tmr = 0 then
+		si2c_get(i2c_addr)
+
+		' Loop through all detected thermometers
+		'
+		if num_sens > 0 then
+			for i=0 to num_sens-1
+				' Read temperature data
+				'
+				' You can use 1-wire OW_SKIP_ROM command, if you are sure that only one
+				' device is connected to the bus, or supply 1-wire address and use
+				' OW_MATCH_ROM command to address specific device
+				'
+				chnl = sens(i).chnl
+				addr = sens(i).addr
+				
+				ow_start(chnl, OW_MATCH_ROM, addr) ' or OW_SKIP_ROM
+				ow_sendb(chnl, CMD_CONVERT_T)
+				ow_stop(chnl)
+				
+				delay(10)
+				
+				' Now read sensor's scratchpad (8 bytes)
+				' we need first and second bytes, where temperature high and low
+				' bytes are stored
+				'
+				ow_start(chnl, OW_MATCH_ROM, addr) ' or OW_SKIP_ROM
+				ow_sendb(chnl, CMD_READ_SCRATCHPAD)
+				sp = ow_recvstr(chnl, 8)
+				ow_stop(chnl)
+
+				' Convert temperature value to the less complicated format using
+				' formula from datasheet
+				'
+				temp = (asc(mid(sp, 2, 1)) shl 8) or asc(mid(sp, 1, 1))
+				if 0 <> (temp and &h0200) then
+					temp = temp xor &hFFFF
+					itemp = -temp
+				else
+					itemp = temp
+				end if
+				
+				sys.debugprint(fmt_addr(addr) + " on channel "+str(chnl)+" reports temperature: " + ftostr(itemp / 16.0, FTOSTR_MODE_AUTO, 4) + "\r\n")
+			next i
+		end if
+		
+		' Poll Single-wire sensors, if any present
+		'
+		for i=0 to 3
+			if channels(i) = SINGLE_WIRE then
+				ow_start(i, OW_READFCV, "") ' Device address is irrelevant here
+				sp = ow_recvstr(i, 5)
+				ow_stop(i)
+
+				if not is_data_valid(sp) then
+					sys.debugprint("SINGLE-WIRE sensor at channel "+str(i)+" DATA CHECKSUM ERROR\r\n")
+				else
+					rh = (asc(mid(sp,1,1)) shl 8) or asc(mid(sp,2,1))
+					temp = (asc(mid(sp,3,1)) shl 8) or asc(mid(sp,4,1))
+
+					if 0 <> (temp and &h8000) then
+						temp = temp xor &h8000
+						itemp = -temp
+					else
+						itemp = temp
+					end if
+
+					if i = 0 then
+						' DHT-11
+						dim rhs as string(16) = str(asc(mid(sp,1,1))) + "." + str(asc(mid(sp,2,1)))
+						dim ths as string(16) = str(asc(mid(sp,3,1))) + "." + str(asc(mid(sp,4,1)))
+						sys.debugprint("SINGLE-WIRE sensor at channel "+str(i)+" reports RH: "+rhs+", temperature: "+ths+"\r\n")
+					else
+						' DHT-22
+						sys.debugprint("SINGLE-WIRE sensor at channel "+str(i)+" reports RH: "+ ftostr(rh / 10.0, FTOSTR_MODE_AUTO, 6) + ", temperature: "+ftostr(itemp / 10.0, FTOSTR_MODE_AUTO, 6)+"\r\n")
+					end if
+				end if
+			end if
+		next i
+		
+		tmr = TMR_PERIOD
+	end if
+end sub
+
+
+sub on_button_pressed()
+	sys.debugprint("Programming PIC coprocessor with new firmware.\r\n")
+	sys.debugprint("Please be patient. This can take a while.\r\n")
+	beep.play("B-B", PL_BEEP_CANINT)
+	pic_upload_firmware(pic_slot, "i2c_1wire_bridge.hex")
+	detect_sensors()
+end sub
