@@ -253,6 +253,7 @@ function detect_sensors() as byte
 	
 	sys.debugprint(str(nd)+" devices connected total, "+str(num_sens)+" temperature sensors\r\n")
 	tmr = TMR_PERIOD
+	
 end function
 
 function is_data_valid(data as string(5)) as boolean

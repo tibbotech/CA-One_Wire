@@ -30,7 +30,7 @@ address=0.24.77.80.40.136
 [address6]
 platform=TPP2W(G2)
 transport=udp_winpcap
-address=0.36.119.82.92.217
+address=0.2.2.3.4.202
 [address7]
 platform=SIMULATOR
 transport=udp_winpcap
@@ -124,5 +124,12 @@ path=device.tbh
 type=header
 format=
 condition=
+locked=no
+location=project
+[file14]
+path=..\..\..\tibbo-sentinel\tibbo-sentinel\1wire.tc
+type=c
+format=65001
+condition=0
 locked=no
 location=project
