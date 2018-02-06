@@ -389,6 +389,7 @@ function load_firmware(byref name as string, byref fw as firmware) as boolean
 	dim p, e, lba as dword
 	dim s, st as string
 	dim rlen, rtyp as byte
+	dim crlf as string(2)
 	
 	load_firmware = false
 
@@ -406,6 +407,13 @@ function load_firmware(byref name as string, byref fw as firmware) as boolean
 		exit function
 	end if
 
+	' Determine, whether line endings in hex file is Windows-style or Unix-style
+	if 0 = romfile.find32(p, "\r\n", 1) then
+		crlf = "\n"
+	else
+		crlf = "\r\n"
+	end if
+	
 	lba = 0
 	
 	while 1
@@ -416,7 +424,7 @@ function load_firmware(byref name as string, byref fw as firmware) as boolean
 		end if
 		
 		' Find end of line
-		e = romfile.find32(p, "\r\n", 1)
+		e = romfile.find32(p, crlf, 1)
 		if e = 0 then
 			e = romfile.size
 		end if
