@@ -5,5 +5,10 @@ include "1wire.tbh"
 include "PIC_LVP.tbh"
 include "device.tbh"
 
-
 const FW_FILE = "i2c_1wire_bridge.hex"
+
+
+'Tibbit loation is not defined. This Tibbit is currently using position 1."
+#define I2S_POS IS_1
+
+

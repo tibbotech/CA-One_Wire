@@ -10,7 +10,7 @@ transport=udp_winpcap
 [address1]
 platform=TPP2W
 transport=udp_winpcap
-address=0.36.119.81.166.51
+address=0.36.119.81.213.215
 [address2]
 platform=TPP3W
 transport=udp_winpcap
@@ -30,7 +30,7 @@ address=0.24.77.80.40.136
 [address6]
 platform=TPP2W(G2)
 transport=udp_winpcap
-address=0.2.2.3.4.202
+address=0.36.119.82.228.6
 [address7]
 platform=SIMULATOR
 transport=udp_winpcap
