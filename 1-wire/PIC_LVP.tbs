@@ -37,6 +37,7 @@ dim use_ssi as boolean
 #define T_ERAB_MS		5
 #define T_PINT_MS		6
 #define T_PEXT_MS		3
+#define T_INCADDR_MS	1
 
 
 function swab(w as word) as word
@@ -167,13 +168,45 @@ end function
 
 
 sub pic_command(b as byte)
+	dim tms as word
+	dim i as word
+	
+	' The delay constants have been picked up empirically by Steve 
+	' and taken from his project. Big thanks, Steve :)
+	'
 	pic_send_bits(b, 6)
-end sub
+	select case b
+		case CMD_READ_DATA_FROM_PROGRAM_MEMORY
+			tms = 4
+			
+		case CMD_INCREMENT_ADDRESS
+			tms = 1
+			
+		case CMD_BEGIN_INTERNALLY_TIMED_PROGRAMMING
+			tms = 900
+			
+		case CMD_BEGIN_EXTERNALLY_TIMED_PROGRAMMING
+			tms = 180
+			
+		case CMD_END_EXTERNALLY_TIMED_PROGRAMMING
+			tms = 15
+			
+		case CMD_BULK_ERASE_PROGRAM_MEMORY
+			tms = 1800
+			
+		case CMD_BULK_ERASE_DATA_MEMORY
+			tms = 1800
+			
+		case CMD_ROW_ERASE_PROGRAM_MEMORY
+			tms = 360
+			
+	case else:
+		exit sub
+	end select
+	
+	for i=0 to tms
+	next i
 
-
-sub pic_command_and_delay(b as byte, ms as word)
-	pic_send_bits(b, 6)
-	delay_ms(ms)
 end sub
 
 
@@ -219,7 +252,7 @@ end function
 function pic_send_cfg_word(w as word) as word
 	pic_command(CMD_LOAD_DATA_FOR_PROGRAM_MEMORY)
 	pic_send_bits((w shl 1) and &h7FFE, 16)
-	pic_command_and_delay(CMD_BEGIN_INTERNALLY_TIMED_PROGRAMMING, T_PINT_MS)
+	pic_command(CMD_BEGIN_INTERNALLY_TIMED_PROGRAMMING)
 	pic_command(CMD_READ_DATA_FROM_PROGRAM_MEMORY)
 	pic_send_cfg_word = pic_recv_bits()
 	sys.debugprint(hex(pic_send_cfg_word)+"\r\n")
@@ -559,7 +592,7 @@ function program_firmware(socket as byte, byref fw as firmware) as boolean
 	pic_command(CMD_LOAD_CONFIG)
 	pic_recv_bits()
 	
-	pic_command_and_delay(CMD_BULK_ERASE_PROGRAM_MEMORY, T_ERAB_MS)
+	pic_command(CMD_BULK_ERASE_PROGRAM_MEMORY)
 	'pic_command_and_delay(CMD_BULK_ERASE_DATA_MEMORY, T_ERAB_MS)
 
 #ifdef PIC_TRACE
@@ -574,7 +607,7 @@ function program_firmware(socket as byte, byref fw as firmware) as boolean
 		for j=0 to 31
 			pic_send_pgm_word(fw.data(i+j), j<31)
 		next j
-		pic_command_and_delay(CMD_BEGIN_INTERNALLY_TIMED_PROGRAMMING, T_PINT_MS)
+		pic_command(CMD_BEGIN_INTERNALLY_TIMED_PROGRAMMING)
 		pic_command(CMD_INCREMENT_ADDRESS)
 	next i
 	

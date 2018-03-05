@@ -14,7 +14,7 @@ sub on_sys_init()
 	' Set up I/O lines based on the slot number where PIC with 1-wire firmware is installed
 	' We assume that PIC is installed in slot 1
 	'
-	choose_iolines(I2S_POS)
+	choose_iolines(IS_5)
 	
 	
 	' Enable h/w SSI use
