@@ -46,7 +46,7 @@ end function
 
 
 sub delay_ms(ms as word)
-#if PLATFORM_ID=TPP2W or PLATFORM_ID=TPP3W
+#if PLATFORM_ID=TPP2W or PLATFORM_ID=TPP2N or PLATFORM_ID=TPP3W or PLATFORM_ID=TPP3N
 	dim ax,bx as word
 
 	for ax=0 to ms
