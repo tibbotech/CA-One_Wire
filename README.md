@@ -1,4 +1,4 @@
-# CA-One_Wire
+# Test Application for 1-Wire Sensors
 
 This demo project was designed to discover and poll widely used DS18B20 digital thermometers, manufactured by Maxim Integrated and other single-wire temperature / humidity sensors such as DHT11, DHT22, etc. The included 1-wire library is intended to be used as a transparent bridge between PIC Tibbit (#31) and 1-wire bus.
 
