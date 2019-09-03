@@ -185,7 +185,7 @@ end function
 
 sub delay(ms as dword)
 	dim i as dword
-#if PLATFORM_ID = TPP2W or PLATFORM_ID = TPP3W
+#if PLATFORM_ID=TPP2W or PLATFORM_ID=TPP2N or PLATFORM_ID=TPP3W or PLATFORM_ID=TPP3N
 	dim j as dword
 	for i = 0 to ms
 		for j = 0 to 10

@@ -3,7 +3,7 @@ watch=
 [file1]
 line=1
 cursor=310
-opened=active
+opened=yes
 breakpoints=
 [file2]
 line=0
@@ -33,9 +33,9 @@ breakpoints=
 [file7]
 opened=no
 [file8]
-line=581
-cursor=13546
-opened=no
+line=39
+cursor=1354
+opened=yes
 breakpoints=
 [file9]
 line=0
@@ -53,9 +53,9 @@ cursor=380
 opened=no
 breakpoints=
 [file12]
-line=33
-cursor=942
-opened=no
+line=180
+cursor=4688
+opened=active
 breakpoints=
 [file13]
 line=0
