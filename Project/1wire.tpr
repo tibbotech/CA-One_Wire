@@ -152,11 +152,4 @@ condition =
 locked = no
 location = project
 
-[file14]
-path = ..\..\..\tibbo-sentinel\tibbo-sentinel\1wire.tc
-type = c
-format = 65001
-condition = 0
-locked = no
-location = project
 
